@@ -4,7 +4,7 @@
                              kazoo_endpoint,kazoo_events,kazoo_globals,
                              kazoo_ledgers,kazoo_modb,kazoo_numbers,
                              kazoo_services,kazoo_stdlib,kernel,lager,stdlib]},
-              {description,"Jonny 5 - Short circuit accounts exceeding call volume"},
+              {description,"Jonny 5: Short circuit accounts exceeding call volume"},
               {env,[{is_kazoo_app,true}]},
               {mod,{jonny5_app,[]}},
               {modules,[]},
