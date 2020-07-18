@@ -39,7 +39,7 @@
         ]).
 
 -include("jonny5.hrl").
--include_lib("kazoo_events/include/kz_hooks.hrl").
+-include_lib("kazoo_hooks/include/kz_hooks.hrl").
 
 -record(state, {sync_ref :: kz_term:api_reference()
                ,sync_timer :: kz_term:api_reference()
