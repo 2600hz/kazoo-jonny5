@@ -47,7 +47,7 @@ determine_number_account_id(Request) ->
 -spec maybe_local_resource(knm_number_options:extra_options(), j5_request:request()) -> 'ok'.
 maybe_local_resource(Props, Request) ->
     case knm_options:is_local_number(Props) of
-        'true' -> 
+        'true' ->
             maybe_authz_local_resource(Request);
         'false' ->
             maybe_account_limited(Request)
