@@ -19,16 +19,38 @@ handle_req(JObj, _) ->
     kz_log:put_callid(JObj),
     'true' = kapi_authz:authz_req_v(JObj),
     Request = j5_request:from_jobj(JObj),
-    maybe_local_resource(Request).
+    determine_number_account_id(Request).
 
--spec maybe_local_resource(j5_request:request()) -> 'ok'.
-maybe_local_resource(Request) ->
+-spec determine_number_account_id(j5_request:request()) -> 'ok'.
+determine_number_account_id(Request) ->
     Number = j5_request:number(Request),
-    AccountId = j5_request:account_id(Request),
-    {'ok', AccountId, Props} = knm_numbers:lookup_account(Number),
+    case knm_numbers:lookup_account(Number) of
+        {'ok', AccountId, Props} ->
+            lager:debug("number ~s belongs to ~s", [Number, AccountId]),
+            maybe_local_resource(AccountId, Props, Request);
+        {'error', _R} ->
+            lager:debug("unable to determine number's account id for ~s: ~p"
+                       ,[Number, _R]
+                       ),
+            maybe_account_limited(Request)
+    end.
+
+-spec maybe_local_resource(kz_term:ne_binary(), knm_number_options:extra_options(), j5_request:request()) -> 'ok'.
+maybe_local_resource(AccountId, Props, Request) ->
     case knm_options:is_local_number(Props) of
-        'true' -> maybe_authz_local_resource(Request);
+        'true' -> 
+            maybe_offnet_call(AccountId, Request);
         'false' ->
+            maybe_account_limited(Request)
+    end.
+
+-spec maybe_offnet_call(kz_term:ne_binary(), j5_request:request()) -> 'ok'.
+maybe_offnet_call(AccountId, Request) ->
+    case j5_request:account_id(Request) of
+        AccountId -> 
+            maybe_authz_local_resource(Request);
+        OtherId ->
+            lager:warning("offnet call from Account ~s to ~s local number",[OtherId, AccountId]),
             maybe_account_limited(Request)
     end.
 
