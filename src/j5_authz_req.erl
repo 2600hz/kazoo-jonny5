@@ -24,7 +24,8 @@ handle_req(JObj, _) ->
 -spec maybe_local_resource(j5_request:request()) -> 'ok'.
 maybe_local_resource(Request) ->
     Number = j5_request:number(Request),
-    {'ok', _, Props} = knm_numbers:lookup_account(Number),
+    AccountId = j5_request:account_id(Request),
+    {'ok', AccountId, Props} = knm_numbers:lookup_account(Number),
     case knm_options:is_local_number(Props) of
         'true' -> maybe_authz_local_resource(Request);
         'false' ->
