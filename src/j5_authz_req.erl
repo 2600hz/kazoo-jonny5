@@ -19,27 +19,31 @@ handle_req(JObj, _) ->
     kz_log:put_callid(JObj),
     'true' = kapi_authz:authz_req_v(JObj),
     Request = j5_request:from_jobj(JObj),
-    maybe_inbound_call(Request).
+    Direction = j5_request:call_direction(Request),
+    maybe_inbound_call(Request, Direction).
 
--spec maybe_inbound_call(j5_request:request()) -> 'ok'.
-maybe_inbound_call(Request) ->
-    case j5_request:call_direction(Request) of
-        <<"inbound">> ->
-            determine_number_account_id(Request);
-        <<"outbound">> ->
-            maybe_account_limited(Request)
-    end.
+-spec maybe_inbound_call(j5_request:request(), kz_term:ne_binary()) -> 'ok'.
+maybe_inbound_call(Request, <<"inbound">>) ->
+    maybe_local_resource(Request);
+maybe_inbound_call(Request, <<"outbound">>) ->
+    maybe_account_limited(Request).
 
--spec determine_number_account_id(j5_request:request()) -> 'ok'.
-determine_number_account_id(Request) ->
+-spec maybe_local_resource(j5_request:request()) -> 'ok'.
+maybe_local_resource(Request) ->
     Number = j5_request:number(Request),
+    AccountId = j5_request:account_id(Request),
     case knm_numbers:lookup_account(Number) of
         {'ok', AccountId, Props} ->
             lager:debug("number ~s belongs to ~s", [Number, AccountId]),
             maybe_local_resource(Props, Request);
+        {'ok', OtherAccountId, _Props} ->
+            lager:error("number ~s belongs to ~s but we're authz ~s"
+                       ,[Number, OtherAccountId, AccountId]
+                       ),
+            maybe_account_limited(Request);
         {'error', _R} ->
-            lager:error("unable to determine number's account id for ~s: ~p"
-                       ,[Number, _R]
+            lager:error("error confirming number's account id (~s) for ~s: ~p"
+                       ,[AccountId, Number, _R]
                        ),
             maybe_account_limited(Request)
     end.
