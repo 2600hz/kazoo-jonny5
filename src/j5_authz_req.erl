@@ -20,12 +20,12 @@ handle_req(JObj, _) ->
     'true' = kapi_authz:authz_req_v(JObj),
     Request = j5_request:from_jobj(JObj),
     Direction = j5_request:call_direction(Request),
-    maybe_inbound_call(Request, Direction).
+    authorize(Request, Direction).
 
--spec maybe_inbound_call(j5_request:request(), kz_term:ne_binary()) -> 'ok'.
-maybe_inbound_call(Request, <<"inbound">>) ->
+-spec authorize(j5_request:request(), kz_term:ne_binary()) -> 'ok'.
+authorize(Request, <<"inbound">>) ->
     maybe_local_resource(Request);
-maybe_inbound_call(Request, <<"outbound">>) ->
+authorize(Request, <<"outbound">>) ->
     maybe_account_limited(Request).
 
 -spec maybe_local_resource(j5_request:request()) -> 'ok'.
