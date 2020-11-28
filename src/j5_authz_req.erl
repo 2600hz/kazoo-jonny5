@@ -19,7 +19,68 @@ handle_req(JObj, _) ->
     kz_log:put_callid(JObj),
     'true' = kapi_authz:authz_req_v(JObj),
     Request = j5_request:from_jobj(JObj),
+    Direction = j5_request:call_direction(Request),
+    authorize_direction(Request, Direction).
+
+-spec authorize_direction(j5_request:request(), kz_term:ne_binary()) -> 'ok'.
+authorize_direction(Request, <<"inbound">>) ->
+    maybe_local_resource(Request);
+authorize_direction(Request, <<"outbound">>) ->
     maybe_account_limited(Request).
+
+-spec maybe_local_resource(j5_request:request()) -> 'ok'.
+maybe_local_resource(Request) ->
+    Number = j5_request:number(Request),
+    AccountId = j5_request:account_id(Request),
+    case knm_numbers:lookup_account(Number) of
+        {'ok', AccountId, Props} ->
+            lager:debug("number ~s belongs to ~s", [Number, AccountId]),
+            maybe_local_resource(Props, Request);
+        {'ok', OtherAccountId, _Props} ->
+            lager:error("number ~s belongs to ~s but we're authz ~s"
+                       ,[Number, OtherAccountId, AccountId]
+                       ),
+            maybe_account_limited(Request);
+        {'error', _R} ->
+            lager:error("error confirming number's account id (~s) for ~s: ~p"
+                       ,[AccountId, Number, _R]
+                       ),
+            maybe_account_limited(Request)
+    end.
+
+-spec maybe_local_resource(knm_number_options:extra_options(), j5_request:request()) -> 'ok'.
+maybe_local_resource(Props, Request) ->
+    case knm_options:is_local_number(Props) of
+        'true' ->
+            maybe_authz_local_resource(Request);
+        'false' ->
+            maybe_account_limited(Request)
+    end.
+
+-spec maybe_authz_local_resource(j5_request:request()) -> 'ok'.
+maybe_authz_local_resource(Request) ->
+    case should_authz_local(Request) of
+        'false' -> allow_local_resource(Request);
+        'true' ->
+            lager:debug("authz_local_resources enabled, applying limits for local numbers"),
+            maybe_account_limited(Request)
+    end.
+
+-spec allow_local_resource(j5_request:request()) -> 'ok'.
+allow_local_resource(Request) ->
+    Number = j5_request:number(Request),
+    lager:debug("number ~s is a local number for account ~s, allowing"
+               ,[Number, j5_request:account_id(Request)]
+               ),
+    Routines = [fun(R) -> j5_request:authorize_account(<<"limits_disabled">>, R) end
+               ,fun(R) -> j5_request:authorize_reseller(<<"limits_disabled">>, R) end
+               ],
+    send_response(lists:foldl(fun(F, R) -> F(R) end, Request, Routines)).
+
+-spec should_authz_local(j5_request:request()) -> boolean().
+should_authz_local(Request) ->
+    Node = j5_request:node(Request),
+    kapps_config:get_is_true(<<"ecallmgr">>, <<"authz_local_resources">>, 'false', Node).
 
 -spec maybe_account_limited(j5_request:request()) -> 'ok'.
 maybe_account_limited(Request) ->
