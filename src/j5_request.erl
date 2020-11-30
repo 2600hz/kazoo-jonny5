@@ -112,7 +112,13 @@
 from_jobj(AuthzReq) ->
     CCVs = kz_json:get_value(<<"Custom-Channel-Vars">>, AuthzReq, kz_json:new()),
 
-    Request = kz_json:get_ne_binary_value(<<"Request">>, AuthzReq),
+    Request = case kz_json:get_ne_binary_value(<<"Request">>, AuthzReq) of
+                    'undefined' ->
+                        lager:error("JObj with empty Request ~p",[AuthzReq]),
+                        kz_json:get_ne_binary_value(<<"To">>, AuthzReq);
+                    ReqURI ->
+                        ReqURI
+              end,
     [Num|_] = binary:split(Request, <<"@">>),
     Number = request_number(Num, CCVs),
 
