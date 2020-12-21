@@ -19,8 +19,8 @@ maybe_send_system_alert(Request) ->
     maybe_send_system_alert(j5_request:is_authorized(Request), Request).
 
 -spec maybe_send_system_alert(boolean(), j5_request:request()) -> 'ok'.
-maybe_send_system_alert('false', _Request) -> 'ok';
-maybe_send_system_alert('true', Request) ->
+maybe_send_system_alert('true', _Request) -> 'ok';
+maybe_send_system_alert('false', Request) ->
     AccountId = j5_request:account_id(Request),
     ResellerId = j5_request:reseller_id(Request),
     Routines = [fun(P) ->
