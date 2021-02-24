@@ -262,7 +262,7 @@ create_limits(AccountId, AccountDb, JObj) ->
            ,reserve_amount = kzd_limits:reserve_units(JObj, kz_currency:dollars_to_units(?DEFAULT_RATE))
            ,allow_prepay = kzd_limits:allow_prepay(JObj)
            ,allow_postpay = kzd_limits:allow_postpay(JObj)
-           ,allotments = kzd_limits:allotments(JObj)
+           ,allotments = kzd_limits:pvt_allotments(JObj)
            ,soft_limit_inbound = kzd_limits:soft_limit_inbound(JObj)
            ,soft_limit_outbound = kzd_limits:soft_limit_outbound(JObj)
            ,authz_resource_types = kzd_limits:authz_resource_types(JObj)
