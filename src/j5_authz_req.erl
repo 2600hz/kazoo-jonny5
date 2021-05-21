@@ -1,5 +1,5 @@
 %%%-----------------------------------------------------------------------------
-%%% @copyright (C) 2012-2020, 2600Hz
+%%% @copyright (C) 2012-2021, 2600Hz
 %%% @doc Handlers for various AMQP payloads
 %%%
 %%% This Source Code Form is subject to the terms of the Mozilla Public
@@ -48,7 +48,7 @@ maybe_local_resource(Request) ->
             maybe_account_limited(Request)
     end.
 
--spec maybe_local_resource(knm_number_options:extra_options(), j5_request:request()) -> 'ok'.
+-spec maybe_local_resource(knm_options:extra_options(), j5_request:request()) -> 'ok'.
 maybe_local_resource(Props, Request) ->
     case knm_options:is_local_number(Props) of
         'true' ->
