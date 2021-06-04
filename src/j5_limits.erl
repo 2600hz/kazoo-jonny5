@@ -33,6 +33,8 @@
 
 -include("jonny5.hrl").
 
+-define(DEFAULT_RATE, 0.5).
+
 -record(limits, {account_id  :: kz_term:api_binary()
                 ,account_db :: kz_term:api_binary()
                 ,enabled = 'true' :: boolean()

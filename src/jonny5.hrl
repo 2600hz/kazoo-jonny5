@@ -5,15 +5,6 @@
 
 -define(CACHE_NAME, 'jonny5_cache').
 
--define(DEFAULT_RATE, 0.5).
-
--define(INBOUND_ACCOUNT_TYPES,
-        [<<"account">>
-        ,<<"device">>
-        ,<<"mobile">>
-        ,<<"sys_info">>
-        ]).
-
 -define(APP_VERSION, kz_application:application_version('jonny5')).
 -define(APP_NAME, <<"jonny5">>).
 
