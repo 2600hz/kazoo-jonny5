@@ -49,14 +49,14 @@ maybe_local_resource(Request) ->
             lager:debug("number ~s belongs to ~s", [Number, AccountId]),
             maybe_local_resource(Props, Request);
         {'ok', OtherAccountId, _Props} ->
-            lager:error("number ~s belongs to ~s but we're authz ~s"
-                       ,[Number, OtherAccountId, AccountId]
-                       ),
+            lager:warning("number ~s belongs to ~s but we're authz ~s"
+                         ,[Number, OtherAccountId, AccountId]
+                         ),
             maybe_account_limited(Request);
         {'error', _R} ->
-            lager:error("error confirming number's account id (~s) for ~s: ~p"
-                       ,[AccountId, Number, _R]
-                       ),
+            lager:warning("error confirming number's account id (~s) for ~s: ~p"
+                         ,[AccountId, Number, _R]
+                         ),
             maybe_account_limited(Request)
     end.
 
