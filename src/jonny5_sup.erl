@@ -27,6 +27,7 @@
                      ]).
 
 -define(CHILDREN, [?CACHE_ARGS(?CACHE_NAME, ?CACHE_PROPS)
+                  ,?WORKER('j5_init')
                   ,?WORKER('jonny5_listener')
                   ,?WORKER('j5_channels')
                   ]).
