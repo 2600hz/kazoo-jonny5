@@ -30,7 +30,7 @@
 
 -define(TICK_INTERVAL, 20 * ?MILLISECONDS_IN_SECOND).
 
--type ra_name() :: 'j5_endpoint_limit'.
+-type ra_name() :: atom().
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -38,11 +38,11 @@
 %%------------------------------------------------------------------------------
 -spec cluster_name() -> kz_term:ne_binary().
 cluster_name() ->
-    <<"j5_endpoint_limit">>.
+    kz_term:to_binary(ra_name()).
 
 -spec ra_name() -> ra_name().
 ra_name() ->
-    'j5_endpoint_limit'.
+    kapps_endpoint_limit_ra:ra_name().
 
 -spec ra_name(non_neg_integer()) -> atom().
 ra_name(0) ->
@@ -70,9 +70,9 @@ members(I) ->
                         X <- lists:seq(0, I)
     ].
 
--spec ra_machine() -> {'module', 'j5_endpoint_limit_ra', map()}.
+-spec ra_machine() -> {'module', atom(), map()}.
 ra_machine() ->
-    {'module', 'j5_endpoint_limit_ra', ra_machine_config()}.
+    {'module', 'kapps_endpoint_limit_ra', ra_machine_config()}.
 
 -spec ra_machine_config() -> map().
 ra_machine_config() ->
