@@ -1,5 +1,5 @@
 %%%-----------------------------------------------------------------------------
-%%% @copyright (C) 2012-2020, 2600Hz
+%%% @copyright (C) 2012-2023, 2600Hz
 %%% @doc Handlers for various AMQP payloads
 %%%
 %%% This Source Code Form is subject to the terms of the Mozilla Public
@@ -14,7 +14,19 @@
 
 -include("jonny5.hrl").
 
--spec handle_req(kapi_authz:req(), kz_term:proplist()) -> any().
+-define(BYPASS_AUTHZ_CLASSIFIERS
+       ,kapps_config:get(?APP_NAME
+                        ,<<"bypass_authz_classifiers">>
+                        ,[kz_json:from_list([{<<"classifier">>,<<"emergency">>}])
+                         ,kz_json:from_list([{<<"classifier">>,<<"tollfree_us">>}
+                                            ,{<<"direction">>,<<"outbound">>}
+                                            ]
+                                           )
+                         ]
+                        )
+       ).
+
+-spec handle_req(kapi_authz:req(), kz_term:proplist()) -> 'ok'.
 handle_req(JObj, _) ->
     kz_log:put_callid(JObj),
     'true' = kapi_authz:authz_req_v(JObj),
@@ -37,18 +49,18 @@ maybe_local_resource(Request) ->
             lager:debug("number ~s belongs to ~s", [Number, AccountId]),
             maybe_local_resource(Props, Request);
         {'ok', OtherAccountId, _Props} ->
-            lager:error("number ~s belongs to ~s but we're authz ~s"
-                       ,[Number, OtherAccountId, AccountId]
-                       ),
+            lager:warning("number ~s belongs to ~s but we're authz ~s"
+                         ,[Number, OtherAccountId, AccountId]
+                         ),
             maybe_account_limited(Request);
         {'error', _R} ->
-            lager:error("error confirming number's account id (~s) for ~s: ~p"
-                       ,[AccountId, Number, _R]
-                       ),
+            lager:warning("error confirming number's account id (~s) for ~s: ~p"
+                         ,[AccountId, Number, _R]
+                         ),
             maybe_account_limited(Request)
     end.
 
--spec maybe_local_resource(knm_number_options:extra_options(), j5_request:request()) -> 'ok'.
+-spec maybe_local_resource(knm_options:extra_options(), j5_request:request()) -> 'ok'.
 maybe_local_resource(Props, Request) ->
     case knm_options:is_local_number(Props) of
         'true' ->
@@ -113,11 +125,15 @@ maybe_reseller_limited(Request) ->
 check_reseller_limits(Request, ResellerId) ->
     Limits = j5_limits:get(ResellerId),
     R = maybe_authorize(Request, Limits),
-    (not j5_request:is_authorized(R, Limits))
-        andalso lager:info("reseller ~s is not authorized to create this channel"
-                          ,[ResellerId]
-                          ),
+
+    maybe_log_if_unauthz(j5_request:is_authorized(R, Limits), ResellerId),
     send_response(R).
+
+maybe_log_if_unauthz('true', _ResellerId) -> 'ok';
+maybe_log_if_unauthz('false', ResellerId) ->
+    lager:info("reseller ~s is not authorized to create this channel"
+              ,[ResellerId]
+              ).
 
 -spec maybe_authorize(j5_request:request(), j5_limits:limits()) ->
           j5_request:request().
@@ -172,17 +188,26 @@ maybe_authorize_resource_type(Request, Limits) ->
 
 -spec maybe_authorize_classification(j5_request:request(), j5_limits:limits()) -> j5_request:request().
 maybe_authorize_classification(Request, Limits) ->
-    Classification = j5_request:classification(Request),
+    CallClassification = j5_request:classification(Request),
     CallDirection = j5_request:call_direction(Request),
+    maybe_authz_classifiers(Request, Limits, CallClassification, CallDirection, ?BYPASS_AUTHZ_CLASSIFIERS).
 
-    case Classification of
-        <<"emergency">> ->
-            lager:debug("allowing emergency call"),
+-spec maybe_authz_classifiers(j5_request:request(), j5_limits:limits(), kz_term:ne_binary(), kz_term:ne_binary(), kz_json:objects()) -> j5_request:request().
+maybe_authz_classifiers(Request, _Limits, _CallClassification, _CallDirection, [])->
+    Request;
+maybe_authz_classifiers(Request, Limits, CallClassification, CallDirection, [Bypass | Bypasses]) ->
+    case {kz_json:get_ne_binary_value(<<"classifier">>, Bypass)
+         ,kz_json:get_ne_binary_value(<<"direction">>, Bypass)
+         }
+    of
+        {CallClassification, 'undefined'} ->
+            lager:debug("bypass classifier ~s, allowing call", [CallClassification]),
             j5_request:authorize(<<"limits_disabled">>, Request, Limits);
-        <<"tollfree_us">> when CallDirection =:= <<"outbound">> ->
-            lager:debug("allowing outbound tollfree call"),
+        {CallClassification, CallDirection} ->
+            lager:debug("bypass classifier ~s direction ~s, allowing call", [CallClassification, CallDirection]),
             j5_request:authorize(<<"limits_disabled">>, Request, Limits);
-        _Else -> Request
+        _Else ->
+            maybe_authz_classifiers(Request, Limits, CallClassification, CallDirection, Bypasses)
     end.
 
 -spec maybe_hard_limit(j5_request:request(), j5_limits:limits()) -> j5_request:request().
@@ -269,8 +294,8 @@ get_outbound_flags(Endpoint) ->
 send_response(Request) ->
     ServerId  = j5_request:server_id(Request),
     AccountDb = kzs_util:format_account_db(j5_request:account_id(Request)),
-    AuthType  = kz_json:get_value(<<"Authorizing-Type">>, j5_request:ccvs(Request)),
-    AuthId    = kz_json:get_value(<<"Authorizing-ID">>, j5_request:ccvs(Request)),
+    AuthType  = kz_json:get_ne_binary_value(<<"Authorizing-Type">>, j5_request:ccvs(Request)),
+    AuthId    = kz_json:get_ne_binary_value(<<"Authorizing-ID">>, j5_request:ccvs(Request)),
 
     OutboundFlags = maybe_get_outbound_flags(AuthType, AuthId, AccountDb),
 
