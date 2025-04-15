@@ -1,5 +1,5 @@
 %%%-----------------------------------------------------------------------------
-%%% @copyright (C) 2012-2023, 2600Hz
+%%% @copyright (C) 2012-2025, 2600Hz
 %%% @doc
 %%% This Source Code Form is subject to the terms of the Mozilla Public
 %%% License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -39,7 +39,6 @@
         ]).
 
 -include("jonny5.hrl").
--include_lib("kazoo_hooks/include/kz_hooks.hrl").
 
 -record(state, {sync_ref :: kz_term:api_reference()
                ,sync_timer :: kz_term:api_reference()
@@ -544,7 +543,7 @@ handle_channel_destroy(<<CallId/binary>>) ->
 %%------------------------------------------------------------------------------
 -spec init([]) -> {'ok', state()}.
 init([]) ->
-    kz_hooks:register(),
+    kz_events:bind_call_id(<<"*">>),
     kz_nodes:notify_expire(),
     _ = ets:new(?TAB, ['set'
                       ,'public'
@@ -605,42 +604,9 @@ handle_info({'synchronize_channels', SyncRef}, #state{sync_ref=SyncRef}=State) -
     {'noreply', start_channel_sync_timer(State)};
 handle_info({'synchronize_channels', _}, State) ->
     {'noreply', State};
-handle_info(?HOOK_EVT(_, <<"CHANNEL_CREATE">>, JObj), State) ->
-    kz_log:put_callid(JObj),
-    %% insert_new keeps a CHANNEL_CREATE from overriding an entry from
-    %% an auth_resp BUT an auth_resp CAN override a CHANNEL_CREATE
-    Channel = #channel{call_id=CallId}=from_jobj(JObj),
-    lager:debug("inserting new channel ~s", [CallId]),
-    _ = ets:insert_new(?TAB, Channel),
-    {'noreply', State};
-handle_info(?HOOK_EVT(_, <<"CHANNEL_ANSWER">>, JObj), State) ->
-    CallId = kz_call_event:call_id(JObj),
-    Props = [{#channel.answered_timestamp, kz_time:now_s()}],
-    lager:info("updating ~s with answered timestamp", [CallId]),
-    _ = ets:update_element(?TAB, CallId, Props),
-    {'noreply', State};
-handle_info(?HOOK_EVT(_, <<"CHANNEL_DESTROY">>, JObj), State) ->
-    handle_channel_destroy(kz_api:call_id(JObj)),
-    {'noreply', State};
-handle_info(?HOOK_EVT(_, <<"CHANNEL_BRIDGE">>, JObj), State) ->
-    channel_bridge(JObj),
-    {'noreply', State};
-handle_info(?HOOK_EVT(_, <<"CHANNEL_UNBRIDGE">>, JObj), State) ->
-    channel_unbridge(JObj),
-    {'noreply', State};
-handle_info(?HOOK_EVT(_, <<"CHANNEL_DISCONNECTED">>, JObj), State) ->
-    %% TODO
-    %% create a timer that when fired
-    %% will call handle_channel_destroy
-    %% if the channel hasn't reconnected
-    %% same should happen in jonny5_listener
-    %% for this event
-    handle_channel_destroy(kz_api:call_id(JObj)),
-    {'noreply', State};
-handle_info(?HOOK_EVT(_, Event, _JObj), State) when Event =:= <<"CHANNEL_CONNECTED">>
-                                                    orelse Event =:= <<"CHANNEL_HOLD">>
-                                                    orelse Event =:= <<"CHANNEL_UNHOLD">>
-                                                    orelse Event =:= <<"DTMF">> ->
+
+handle_info({'kapi', {_, _, CallEvent}}, State) ->
+    handle_call_event(kz_api:event_name(CallEvent), CallEvent),
     {'noreply', State};
 handle_info('cleanup', State) ->
     _P = kz_process:spawn(fun delete_destroyed_channels/0),
@@ -742,8 +708,8 @@ count_unique_calls([{CallId, 'undefined'}|Channels], Set) ->
     count_unique_calls(Channels, sets:add_element(CallId, Set));
 count_unique_calls([{CallId, OtherId}|Channels], Set) ->
     case sets:is_element(OtherId, Set) of
-        true -> count_unique_calls(Channels, Set);
-        false -> count_unique_calls(Channels, sets:add_element(CallId, Set))
+        'true' -> count_unique_calls(Channels, Set);
+        'false' -> count_unique_calls(Channels, sets:add_element(CallId, Set))
     end.
 
 -spec j5_channel_ids() -> sets:set().
@@ -893,7 +859,7 @@ channel_bridge(JObj) ->
                                            ]),
     'ok'.
 
--spec channel_unbridge(kz_json:object()) -> any().
+-spec channel_unbridge(kz_json:object()) -> 'ok'.
 channel_unbridge(JObj) ->
     UUID = kz_call_event:call_id(JObj),
     OtherLeg = kz_json:get_ne_binary_value(<<"Bridge-B-Unique-ID">>, JObj),
@@ -904,3 +870,33 @@ channel_unbridge(JObj) ->
                                            ,{#channel.timestamp, kz_time:now_s()}
                                            ]),
     'ok'.
+
+handle_call_event(<<"CHANNEL_CREATE">>, CallEvent) ->
+    kz_log:put_callid(CallEvent),
+    %% insert_new keeps a CHANNEL_CREATE from overriding an entry from
+    %% an auth_resp BUT an auth_resp CAN override a CHANNEL_CREATE
+    Channel = #channel{call_id=CallId}=from_jobj(CallEvent),
+    _ = ets:insert_new(?TAB, Channel),
+    lager:debug("inserted new channel ~s", [CallId]);
+handle_call_event(<<"CHANNEL_ANSWER">>, CallEvent) ->
+    CallId = kz_call_event:call_id(CallEvent),
+    Props = [{#channel.answered_timestamp, kz_time:now_s()}],
+    _ = ets:update_element(?TAB, CallId, Props),
+    lager:info("updated ~s with answered timestamp", [CallId]);
+
+handle_call_event(<<"CHANNEL_DESTROY">>, CallEvent) ->
+    handle_channel_destroy(kz_api:call_id(CallEvent));
+handle_call_event(<<"CHANNEL_BRIDGE">>, CallEvent) ->
+    channel_bridge(CallEvent);
+handle_call_event(<<"CHANNEL_UNBRIDGE">>, CallEvent) ->
+    channel_unbridge(CallEvent);
+handle_call_event(<<"CHANNEL_DISCONNECTED">>, CallEvent) ->
+    %% TODO
+    %% create a timer that when fired
+    %% will call handle_channel_destroy
+    %% if the channel hasn't reconnected
+    %% same should happen in jonny5_listener
+    %% for this event
+    handle_channel_destroy(kz_api:call_id(CallEvent));
+handle_call_event(_Event, _CallEvent) ->
+    lager:debug("ignoring call event ~s for ~s", [_Event, kz_call_event:call_id(_CallEvent)]).
