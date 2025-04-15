@@ -28,6 +28,7 @@
 -export([to_props/1]).
 -export([handle_authz_resp/2]).
 -export([handle_rate_resp/2]).
+-export([handle_call_event/1]).
 
 -export([init/1
         ,handle_call/3
@@ -543,7 +544,7 @@ handle_channel_destroy(<<CallId/binary>>) ->
 %%------------------------------------------------------------------------------
 -spec init([]) -> {'ok', state()}.
 init([]) ->
-    kz_events:bind_call_id(<<"*">>),
+    kz_events:add_async_call_event_handler(<<"*">>, <<"*">>, fun handle_call_event/1),
     kz_nodes:notify_expire(),
     _ = ets:new(?TAB, ['set'
                       ,'public'
@@ -606,7 +607,8 @@ handle_info({'synchronize_channels', _}, State) ->
     {'noreply', State};
 
 handle_info({'kapi', {_, _, CallEvent}}, State) ->
-    handle_call_event(kz_api:event_name(CallEvent), CallEvent),
+    lager:info("kapi event recv: ~p", [CallEvent]),
+    handle_call_event(CallEvent),
     {'noreply', State};
 handle_info('cleanup', State) ->
     _P = kz_process:spawn(fun delete_destroyed_channels/0),
@@ -870,6 +872,11 @@ channel_unbridge(JObj) ->
                                            ,{#channel.timestamp, kz_time:now_s()}
                                            ]),
     'ok'.
+
+-spec handle_call_event(kapi_call:event()) -> 'ok'.
+handle_call_event([CallEvent]) ->
+    lager:info("call event recv: ~p", [CallEvent]),
+    handle_call_event(kz_api:event_name(CallEvent), CallEvent).
 
 handle_call_event(<<"CHANNEL_CREATE">>, CallEvent) ->
     kz_log:put_callid(CallEvent),

@@ -1,5 +1,5 @@
 %%%-----------------------------------------------------------------------------
-%%% @copyright (C) 2012-2023, 2600Hz
+%%% @copyright (C) 2012-2025, 2600Hz
 %%% @doc
 %%% This Source Code Form is subject to the terms of the Mozilla Public
 %%% License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -11,9 +11,9 @@
 
 -behaviour(application).
 
--include_lib("kazoo_stdlib/include/kz_types.hrl").
-
 -export([start/2, stop/1]).
+
+-include_lib("kazoo_stdlib/include/kz_types.hrl").
 
 %%------------------------------------------------------------------------------
 %% @doc Implement the application start behaviour.
@@ -22,6 +22,7 @@
 -spec start(application:start_type(), any()) -> kz_types:startapp_ret().
 start(_Type, _Args) ->
     _ = declare_exchanges(),
+    kz_events:start_call_events(),
     jonny5_sup:start_link().
 
 %%------------------------------------------------------------------------------
@@ -31,7 +32,6 @@ start(_Type, _Args) ->
 -spec stop(any()) -> any().
 stop(_State) ->
     'ok'.
-
 
 -spec declare_exchanges() -> 'ok'.
 declare_exchanges() ->
