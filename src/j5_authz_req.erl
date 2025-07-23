@@ -77,7 +77,7 @@ maybe_local_resource(Props, Request, Number) ->
         'true' ->
             maybe_authz_local_resource(Request);
         'false' ->
-            maybe_allow_number_carrier(Props, Request, Number)
+            maybe_allow_number_carrier(Request, Number)
     end.
 
 -spec maybe_authz_local_resource(j5_request:request()) -> 'ok'.
@@ -106,14 +106,13 @@ should_authz_local(Request) ->
     Node = j5_request:node(Request),
     kapps_config:get_is_true(<<"ecallmgr">>, <<"authz_local_resources">>, 'false', Node).
 
--spec maybe_allow_number_carrier(knm_options:extra_options(), j5_request:request(), kz_term:ne_binary()) -> 'ok'.
-maybe_allow_number_carrier(Props, Request, Number) ->
-    Carrier = knm_options:module_name(Props),
-    case knm_carriers:is_number_billable(Number, Carrier) of
+-spec maybe_allow_number_carrier(j5_request:request(), kz_term:ne_binary()) -> 'ok'.
+maybe_allow_number_carrier(Request, Number) ->
+    case knm_numbers:is_number_billable(Number) of
         'false' ->
-            lager:debug("number ~s carrier is ~s is not billable, allowing", [j5_request:number(Request), Carrier]),
+            lager:debug("number ~s is not billable, allowing", [j5_request:number(Request)]),
             allow_local_resource(Request);
-        'false' ->
+        'true' ->
             maybe_account_limited(Request)
     end.
 
