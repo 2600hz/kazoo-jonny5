@@ -1,5 +1,5 @@
 %%%-----------------------------------------------------------------------------
-%%% @copyright (C) 2012-2023, 2600Hz
+%%% @copyright (C) 2012-2025, 2600Hz
 %%% @doc Handlers for various AMQP payloads
 %%%
 %%% This Source Code Form is subject to the terms of the Mozilla Public
@@ -36,18 +36,36 @@ handle_req(JObj, _) ->
 
 -spec authorize_direction(j5_request:request(), kz_term:ne_binary()) -> 'ok'.
 authorize_direction(Request, <<"inbound">>) ->
-    maybe_local_resource(Request);
+    Number = j5_request:number(Request),
+    maybe_local_resource(Request, Number);
 authorize_direction(Request, <<"outbound">>) ->
+    %% FIXME: see from_number function below
+    %% Number = from_number(j5_request:from(Request)),
+    %% maybe_local_resource(Request, Number).
     maybe_account_limited(Request).
 
--spec maybe_local_resource(j5_request:request()) -> 'ok'.
-maybe_local_resource(Request) ->
-    Number = j5_request:number(Request),
+%% FIXME: previously authz was running on both directions
+%% then after a refactor the code was removed, then it was added back
+%% but only for inbound direction.
+%% Even the original code was not cosidering using the From number.
+%% Since this is a potential breaking change, we need to re-visit this later.
+%% -spec from_number(kz_term:api_binary()) -> kz_term:api_binary().
+%% from_number('undefined') ->
+%%     'undefined';
+%% from_number(<<"sip:", Rest/binary>>) -> from_number(Rest);
+%% from_number(Number) ->
+%%     case binary:split(Number, <<"@">>, ['trim_all']) of
+%%         [] -> 'undefined';
+%%         [Num|_] -> Num
+%%     end.
+
+-spec maybe_local_resource(j5_request:request(), kz_term:api_ne_binary()) -> 'ok'.
+maybe_local_resource(Request, Number) ->
     AccountId = j5_request:account_id(Request),
     case knm_numbers:lookup_account(Number) of
         {'ok', AccountId, Props} ->
             lager:debug("number ~s belongs to ~s", [Number, AccountId]),
-            maybe_local_resource(Props, Request);
+            maybe_local_resource(Props, Request, Number);
         {'ok', OtherAccountId, _Props} ->
             lager:warning("number ~s belongs to ~s but we're authz ~s"
                          ,[Number, OtherAccountId, AccountId]
@@ -60,19 +78,24 @@ maybe_local_resource(Request) ->
             maybe_account_limited(Request)
     end.
 
--spec maybe_local_resource(knm_options:extra_options(), j5_request:request()) -> 'ok'.
-maybe_local_resource(Props, Request) ->
+-spec maybe_local_resource(knm_options:extra_options(), j5_request:request(), kz_term:ne_binary()) -> 'ok'.
+maybe_local_resource(Props, Request, Number) ->
     case knm_options:is_local_number(Props) of
         'true' ->
             maybe_authz_local_resource(Request);
         'false' ->
-            maybe_account_limited(Request)
+            maybe_allow_number_carrier(Request, Number)
     end.
 
 -spec maybe_authz_local_resource(j5_request:request()) -> 'ok'.
 maybe_authz_local_resource(Request) ->
+    Number = j5_request:number(Request),
     case should_authz_local(Request) of
-        'false' -> allow_local_resource(Request);
+        'false' ->
+            lager:debug("number ~s is a local number for account ~s, allowing"
+                       ,[Number, j5_request:account_id(Request)]
+                       ),
+            allow_local_resource(Request);
         'true' ->
             lager:debug("authz_local_resources enabled, applying limits for local numbers"),
             maybe_account_limited(Request)
@@ -80,10 +103,6 @@ maybe_authz_local_resource(Request) ->
 
 -spec allow_local_resource(j5_request:request()) -> 'ok'.
 allow_local_resource(Request) ->
-    Number = j5_request:number(Request),
-    lager:debug("number ~s is a local number for account ~s, allowing"
-               ,[Number, j5_request:account_id(Request)]
-               ),
     Routines = [fun(R) -> j5_request:authorize_account(<<"limits_disabled">>, R) end
                ,fun(R) -> j5_request:authorize_reseller(<<"limits_disabled">>, R) end
                ],
@@ -93,6 +112,16 @@ allow_local_resource(Request) ->
 should_authz_local(Request) ->
     Node = j5_request:node(Request),
     kapps_config:get_is_true(<<"ecallmgr">>, <<"authz_local_resources">>, 'false', Node).
+
+-spec maybe_allow_number_carrier(j5_request:request(), kz_term:ne_binary()) -> 'ok'.
+maybe_allow_number_carrier(Request, Number) ->
+    case knm_numbers:is_number_billable(Number) of
+        'false' ->
+            lager:debug("number ~s is not billable, allowing", [j5_request:number(Request)]),
+            allow_local_resource(Request);
+        'true' ->
+            maybe_account_limited(Request)
+    end.
 
 -spec maybe_account_limited(j5_request:request()) -> 'ok'.
 maybe_account_limited(Request) ->
