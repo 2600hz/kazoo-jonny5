@@ -39,18 +39,25 @@ authorize_direction(Request, <<"inbound">>) ->
     Number = j5_request:number(Request),
     maybe_local_resource(Request, Number);
 authorize_direction(Request, <<"outbound">>) ->
-    Number = from_number(j5_request:from(Request)),
-    maybe_local_resource(Request, Number).
+    %% FIXME: see from_number function bellow
+    %% Number = from_number(j5_request:from(Request)),
+    %% maybe_local_resource(Request, Number).
+    maybe_account_limited(Request).
 
--spec from_number(kz_term:api_binary()) -> kz_term:api_binary().
-from_number('undefined') ->
-    'undefined';
-from_number(<<"sip:", Rest/binary>>) -> from_number(Rest);
-from_number(Number) ->
-    case binary:split(Number, <<"@">>, ['trim_all']) of
-        [] -> 'undefined';
-        [Num|_] -> Num
-    end.
+%% FIXME: previously authz was running on both directions
+%% then after a refactor the code was removed, then it was added back
+%% but only for inbound direction.
+%% Even the original code was not cosidering using the From number.
+%% Since this is a potential breaking change, we need to re-visit this later.
+%% -spec from_number(kz_term:api_binary()) -> kz_term:api_binary().
+%% from_number('undefined') ->
+%%     'undefined';
+%% from_number(<<"sip:", Rest/binary>>) -> from_number(Rest);
+%% from_number(Number) ->
+%%     case binary:split(Number, <<"@">>, ['trim_all']) of
+%%         [] -> 'undefined';
+%%         [Num|_] -> Num
+%%     end.
 
 -spec maybe_local_resource(j5_request:request(), kz_term:api_ne_binary()) -> 'ok'.
 maybe_local_resource(Request, Number) ->
