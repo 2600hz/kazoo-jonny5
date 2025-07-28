@@ -39,7 +39,7 @@ authorize_direction(Request, <<"inbound">>) ->
     Number = j5_request:number(Request),
     maybe_local_resource(Request, Number);
 authorize_direction(Request, <<"outbound">>) ->
-    %% FIXME: see from_number function bellow
+    %% FIXME: see from_number function below
     %% Number = from_number(j5_request:from(Request)),
     %% maybe_local_resource(Request, Number).
     maybe_account_limited(Request).
