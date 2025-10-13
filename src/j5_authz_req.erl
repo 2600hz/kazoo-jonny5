@@ -39,106 +39,56 @@ authorize_direction(Request, <<"inbound">>) ->
     Number = j5_request:number(Request),
     maybe_local_resource(Request, Number);
 authorize_direction(Request, <<"outbound">>) ->
-    %% FIXME: see from_number function below
-    %% Number = from_number(j5_request:from(Request)),
-    %% maybe_local_resource(Request, Number).
-    maybe_account_limited(Request).
-
-%% FIXME: previously authz was running on both directions
-%% then after a refactor the code was removed, then it was added back
-%% but only for inbound direction.
-%% Even the original code was not cosidering using the From number.
-%% Since this is a potential breaking change, we need to re-visit this later.
-%% -spec from_number(kz_term:api_binary()) -> kz_term:api_binary().
-%% from_number('undefined') ->
-%%     'undefined';
-%% from_number(<<"sip:", Rest/binary>>) -> from_number(Rest);
-%% from_number(Number) ->
-%%     case binary:split(Number, <<"@">>, ['trim_all']) of
-%%         [] -> 'undefined';
-%%         [Num|_] -> Num
-%%     end.
+    NumberProps = number_props_from_request(Request),
+    maybe_account_limited(Request, NumberProps).
 
 -spec maybe_local_resource(j5_request:request(), kz_term:api_ne_binary()) -> 'ok'.
 maybe_local_resource(Request, Number) ->
-    AccountId = j5_request:account_id(Request),
     case knm_numbers:lookup_account(Number) of
-        {'ok', AccountId, Props} ->
-            lager:debug("number ~s belongs to ~s", [Number, AccountId]),
-            maybe_local_resource(Props, Request, Number);
-        {'ok', OtherAccountId, _Props} ->
-            lager:warning("number ~s belongs to ~s but we're authz ~s"
-                         ,[Number, OtherAccountId, AccountId]
-                         ),
-            maybe_account_limited(Request);
+        {'ok', _AccountId, Props} ->
+            lager:debug("number ~s belongs to ~s", [Number, _AccountId]),
+            maybe_account_limited(Request, Props);
         {'error', _R} ->
             lager:warning("error confirming number's account id (~s) for ~s: ~p"
-                         ,[AccountId, Number, _R]
+                         ,[j5_request:account_id(Request), Number, _R]
                          ),
-            maybe_account_limited(Request)
+            NumberProps = number_props_from_request(Request),
+            maybe_account_limited(Request, NumberProps)
     end.
 
--spec maybe_local_resource(knm_options:extra_options(), j5_request:request(), kz_term:ne_binary()) -> 'ok'.
-maybe_local_resource(Props, Request, Number) ->
-    case knm_options:is_local_number(Props) of
-        'true' ->
-            maybe_authz_local_resource(Request);
-        'false' ->
-            maybe_allow_number_carrier(Request, Number)
-    end.
+-spec number_props_from_request(j5_request:request()) -> knm_options:extra_options().
+number_props_from_request(Request) ->
+    props:filter_undefined(
+      [{'module_name', kz_json:get_ne_binary_value(<<"Authz-Number-Module">>, j5_request:ccvs(Request))}]
+     ).
 
--spec maybe_authz_local_resource(j5_request:request()) -> 'ok'.
-maybe_authz_local_resource(Request) ->
-    Number = j5_request:number(Request),
-    case should_authz_local(Request) of
-        'false' ->
-            lager:debug("number ~s is a local number for account ~s, allowing"
-                       ,[Number, j5_request:account_id(Request)]
-                       ),
-            allow_local_resource(Request);
-        'true' ->
-            lager:debug("authz_local_resources enabled, applying limits for local numbers"),
-            maybe_account_limited(Request)
-    end.
-
--spec allow_local_resource(j5_request:request()) -> 'ok'.
-allow_local_resource(Request) ->
-    Routines = [fun(R) -> j5_request:authorize_account(<<"limits_disabled">>, R) end
-               ,fun(R) -> j5_request:authorize_reseller(<<"limits_disabled">>, R) end
-               ],
-    send_response(lists:foldl(fun(F, R) -> F(R) end, Request, Routines)).
-
--spec should_authz_local(j5_request:request()) -> boolean().
-should_authz_local(Request) ->
-    Node = j5_request:node(Request),
-    kapps_config:get_is_true(<<"ecallmgr">>, <<"authz_local_resources">>, 'false', Node).
-
--spec maybe_allow_number_carrier(j5_request:request(), kz_term:ne_binary()) -> 'ok'.
-maybe_allow_number_carrier(Request, Number) ->
-    case knm_numbers:is_number_billable(Number) of
-        'false' ->
-            lager:debug("number ~s is not billable, allowing", [j5_request:number(Request)]),
-            allow_local_resource(Request);
-        'true' ->
-            maybe_account_limited(Request)
-    end.
-
--spec maybe_account_limited(j5_request:request()) -> 'ok'.
-maybe_account_limited(Request) ->
+-spec maybe_account_limited(j5_request:request(), knm_options:extra_options()) -> 'ok'.
+maybe_account_limited(Request, NumberProps) ->
     AccountId = j5_request:account_id(Request),
-    Limits = j5_limits:get(AccountId),
-    R = maybe_authorize(Request, Limits),
-    case j5_request:is_authorized(R, Limits) of
-        'true' -> maybe_reseller_limited(R);
+    JObj = j5_request:to_jobj(Request),
+    case knm_numbers:maybe_account_limited(NumberProps, JObj) of
         'false' ->
-            lager:info("account ~s is not authorized to create this channel"
-                      ,[AccountId]
+            lager:info("account ~s limits are disabled by resource module ~s"
+                      ,[AccountId, knm_options:module_name(NumberProps)]
                       ),
-            send_response(R)
+            AccountDisabled = j5_request:authorize_account(<<"limits_disabled">>, Request),
+            maybe_reseller_limited(AccountDisabled, NumberProps);
+        _ ->
+            AccountId = j5_request:account_id(Request),
+            Limits = j5_limits:get(AccountId),
+            R = maybe_authorize(Request, Limits),
+            case j5_request:is_authorized(R, Limits) of
+                'true' -> maybe_reseller_limited(R, NumberProps);
+                'false' ->
+                    lager:info("account ~s is not authorized to create this channel"
+                              ,[AccountId]
+                              ),
+                    send_response(R)
+            end
     end.
 
--spec maybe_reseller_limited(j5_request:request()) -> 'ok'.
-maybe_reseller_limited(Request) ->
+-spec maybe_reseller_limited(j5_request:request(), knm_options:extra_options()) -> 'ok'.
+maybe_reseller_limited(Request, NumberProps) ->
     ResellerId = j5_request:reseller_id(Request),
     case j5_request:account_id(Request) =:= ResellerId of
         'true' ->
@@ -147,7 +97,16 @@ maybe_reseller_limited(Request) ->
               j5_request:authorize_reseller(<<"limits_disabled">>, Request)
              );
         'false' ->
-            check_reseller_limits(Request, ResellerId)
+            JObj = j5_request:to_jobj(Request),
+            case knm_numbers:maybe_reseller_limited(NumberProps, JObj) of
+                'false' ->
+                    lager:info("reseller ~s limits are disabled by resource module ~s", [ResellerId, NumberProps]),
+                    send_response(
+                      j5_request:authorize_reseller(<<"limits_disabled">>, Request)
+                     );
+                _ ->
+                    check_reseller_limits(Request, ResellerId)
+            end
     end.
 
 -spec check_reseller_limits(j5_request:request(), kz_term:ne_binary()) -> 'ok'.
